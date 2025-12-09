@@ -1,13 +1,9 @@
 import subprocess
-import openpyxl
-import os
+import csv
+import re
 
-
-# Helper function to run mm1.exe with given parameters
+# Run mm1.exe simulation
 def run_simulation(seed, interarrival, service, K, n_batches, k_arrivals):
-    """
-    This function runs mm1.exe using subprocess and collects the text output.
-    """
     process = subprocess.Popen(
         ["mm1.exe"],
         stdin=subprocess.PIPE,
@@ -15,54 +11,64 @@ def run_simulation(seed, interarrival, service, K, n_batches, k_arrivals):
         stderr=subprocess.PIPE,
         text=True
     )
-
-    # Prepare input sequence as if user typed them manually in the console
-    input_data = f"{seed}\nM\n{interarrival}\n{K}\nM\n{service}\n1\n{n_batches}\n{k_arrivals}\n"
-
+    input_data = (
+        f"{seed}\nM\n{interarrival}\n{K}\nM\n{service}\n1\n{n_batches}\n{k_arrivals}\n"
+    )
     output, error = process.communicate(input=input_data)
     return output
 
+# Parse output and save CSV with proper headers
+def parse_and_save_csv(text_output, filename):
+    lines = text_output.split("\n")
+    batch_data = []
+    summary_data = {}
 
-# Helper function to save output to Excel
-def save_to_excel(text_output, filename):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Simulation Output"
+    # Regex to parse batch rows
+    batch_pattern = re.compile(r"^\s*(\d+):\s+([\d\.\-#]+)\s+([\d\.\-#]+)\s+([\d\.\-#]+)\s+([\d\.\-#]+)")
+    summary_patterns = {
+        "ServerUtilization": re.compile(r"Server utilisation rho:\s+([\d\.\-#]+)"),
+        "LossRatio": re.compile(r"Loss ratio:\s+([\d\.\-#]+)"),
+        "AverageQueued": re.compile(r"Average number of queued arrivals:\s+([\d\.\-#]+)"),
+        "AverageDelayQueued": re.compile(r"Average delay of queued arrivals:\s+([\d\.\-#]+)")
+    }
 
-    # Write line-by-line to excel
-    for i, line in enumerate(text_output.split("\n"), start=1):
-        ws.cell(row=i, column=1, value=line)
+    # Parse each line
+    for line in lines:
+        m = batch_pattern.match(line)
+        if m:
+            batch_data.append(m.groups())
+            continue
 
-    wb.save(filename)
+        for key, pattern in summary_patterns.items():
+            sm = pattern.search(line)
+            if sm:
+                summary_data[key] = sm.group(1)
 
+    # Write CSV
+    with open(filename, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        # Batch headers
+        writer.writerow(["Batch", "LossProbability", "ServerUtilization", "AvgQueued", "AvgDelayQueued"])
+        for row in batch_data:
+            writer.writerow(row)
 
+        # Summary section
+        writer.writerow([])
+        writer.writerow(["Summary"])
+        for key, val in summary_data.items():
+            writer.writerow([key, val])
 
-# Main
-print("--- TASK 1 AUTOMATED SIMULATION SCRIPT ---")
-print("This script will run parts a, b, c for k = 250, 1000, 4000")
-print("Results will be saved as Excel files.\n")
-
-# n = int(input("Enter number of batches (n): "))
+# ---------------- MAIN ----------------
 n = 100
-
-# Queue size = 0 for task 1
 K = 0
-
-# Fixed seed for reproducibility
 seed = 543524533
 
-# Task 1 parameter sets
 cases = {
     "a": {"interarrival": 5, "service": 5},
     "b": {"interarrival": 5, "service": 4},
     "c": {"interarrival": 5, "service": 3},
 }
-
-# Values of k to test
 k_values = [250, 1000, 4000]
-
-
-# RUNNING ALL SIMULATIONS
 
 for case_name, params in cases.items():
     inter = params["interarrival"]
@@ -70,7 +76,6 @@ for case_name, params in cases.items():
 
     for k in k_values:
         print(f"\nRunning Case {case_name.upper()} with k = {k} ...")
-
         sim_output = run_simulation(
             seed=seed,
             interarrival=inter,
@@ -79,10 +84,8 @@ for case_name, params in cases.items():
             n_batches=n,
             k_arrivals=k
         )
-
-        filename = f"t1p'{case_name}'k'{k}'.xlsx"
-        save_to_excel(sim_output, filename)
-
+        filename = f"t1p_{case_name}_k_{k}.csv"
+        parse_and_save_csv(sim_output, filename)
         print(f"Saved → {filename}")
 
 print("\nAll simulations completed successfully!")
